@@ -2,6 +2,7 @@ pub mod action;
 pub mod attribute;
 pub mod ui_element;
 mod util;
+pub mod value;
 
 use accessibility_sys::AXError;
 use core_foundation::{array::CFArray, base::TCFType, string::CFString};
