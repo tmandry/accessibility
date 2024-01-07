@@ -105,7 +105,12 @@ impl AXUIElement {
             )))
         };
         if let Ok(val) = &res {
-            assert!(T::type_id() == CFType::type_id() || T::type_id() == val.type_of());
+            if T::type_id() != CFType::type_id() && !val.instance_of::<T>() {
+                return Err(Error::UnexpectedType {
+                    expected: T::type_id(),
+                    received: val.type_of(),
+                });
+            }
         }
         res
     }

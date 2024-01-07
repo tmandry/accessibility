@@ -5,7 +5,12 @@ mod util;
 pub mod value;
 
 use accessibility_sys::AXError;
-use core_foundation::{array::CFArray, base::TCFType, string::CFString};
+use core_foundation::{
+    array::CFArray,
+    base::CFTypeID,
+    base::{CFCopyTypeIDDescription, TCFType},
+    string::CFString,
+};
 use std::{
     cell::{Cell, RefCell},
     thread,
@@ -21,8 +26,21 @@ pub use ui_element::*;
 pub enum Error {
     #[error("element not found")]
     NotFound,
+    #[error(
+        "expected attribute type {} but got {}",
+        type_name(*expected),
+        type_name(*received),
+    )]
+    UnexpectedType {
+        expected: CFTypeID,
+        received: CFTypeID,
+    },
     #[error("accessibility error {0:?}")]
     Ax(AXError),
+}
+
+fn type_name(type_id: CFTypeID) -> CFString {
+    unsafe { CFString::wrap_under_create_rule(CFCopyTypeIDDescription(type_id)) }
 }
 
 pub trait TreeVisitor {
