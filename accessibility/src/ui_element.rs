@@ -1,4 +1,5 @@
 use std::{
+    fmt::Debug,
     thread,
     time::{Duration, Instant},
 };
@@ -15,19 +16,33 @@ use cocoa::{
 use core_foundation::{
     array::CFArray,
     base::{CFType, TCFType, TCFTypeRef},
-    declare_TCFType, impl_CFTypeDescription, impl_TCFType,
+    declare_TCFType, impl_TCFType,
     string::CFString,
 };
 use objc::{class, msg_send, rc::autoreleasepool, sel, sel_impl};
 
 use crate::{
     util::{ax_call, ax_call_void},
-    AXAttribute, Error,
+    AXAttribute, AXUIElementAttributes, Error,
 };
 
 declare_TCFType!(AXUIElement, AXUIElementRef);
 impl_TCFType!(AXUIElement, AXUIElementRef, AXUIElementGetTypeID);
-impl_CFTypeDescription!(AXUIElement);
+
+impl Debug for AXUIElement {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let (role, title) = (self.role(), self.title());
+        let mut fmt = f.debug_tuple(
+            role.map(|r| r.to_string())
+                .as_deref()
+                .unwrap_or("AXUIElement"),
+        );
+        if let Ok(title) = &title {
+            fmt.field(&title);
+        }
+        fmt.finish()
+    }
+}
 
 impl AXUIElement {
     pub fn system_wide() -> Self {
