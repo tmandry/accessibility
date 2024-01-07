@@ -16,7 +16,7 @@ use core_foundation::{
     string::CFString,
 };
 use core_graphics_types::geometry::{CGPoint, CGRect, CGSize};
-use std::marker::PhantomData;
+use std::{fmt::Debug, marker::PhantomData};
 
 use crate::{value::AXValue, AXUIElement, ElementFinder, Error};
 
@@ -24,8 +24,14 @@ pub trait TAXAttribute {
     type Value: TCFType;
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct AXAttribute<T>(CFString, PhantomData<*const T>);
+
+impl<T> Debug for AXAttribute<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
 
 impl<T: TCFType> TAXAttribute for AXAttribute<T> {
     type Value = T;
@@ -85,6 +91,56 @@ macro_rules! accessor {
     };
 }
 
+macro_rules! debug_field {
+    ($self:ident, $fmt:ident, $name:ident, AXUIElement, $($rest:tt)*) => {
+        debug_field!(@short $self, $fmt, $name,);
+    };
+    ($self:ident, $fmt:ident, $name:ident, CFArray<AXUIElement>, $($rest:tt)*) => {
+            let $name = $self.$name();
+            if let Ok(value) = &$name {
+                $fmt.field(stringify!($name), &NoAlternate(Forward(&value)));
+            }
+    };
+    ($self:ident, $fmt:ident, $name:ident, CFBoolean, $($rest:tt)*) => {
+            let $name = $self.$name();
+            if let Ok(value) = &$name {
+                let value: bool = value.clone().into();
+                $fmt.field(stringify!($name), &value);
+            }
+    };
+    (@short $self:ident, $fmt:ident, $name:ident, $($rest:tt)*) => {
+        let $name = $self.$name();
+        if let Ok(value) = &$name {
+            $fmt.field(stringify!($name), &NoAlternate(value));
+        }
+    };
+    ($self:ident, $fmt:ident, $name:ident, $($rest:tt)*) => {
+        let $name = $self.$name();
+        if let Ok(value) = &$name {
+            $fmt.field(stringify!($name), &value);
+        }
+    };
+}
+
+struct NoAlternate<T>(T);
+impl<T: Debug> Debug for NoAlternate<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self.0)
+    }
+}
+
+struct Forward<'a>(&'a CFArray<AXUIElement>);
+impl<'a> Debug for Forward<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut list = f.debug_list();
+        for elem in self.0 {
+            let elem: &AXUIElement = &*elem;
+            list.entry(elem);
+        }
+        list.finish()
+    }
+}
+
 macro_rules! define_attributes {
     ($(($($args:tt)*)),*,) => {
         impl AXAttribute<()> {
@@ -102,6 +158,14 @@ macro_rules! define_attributes {
         impl AXUIElementAttributes for ElementFinder {
             $(accessor!(@impl $($args)*);)*
         }
+
+        impl AXUIElement {
+            pub(crate) fn debug_all(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                let mut fmt = f.debug_struct("AXUIElement");
+                $(debug_field!(self, fmt, $($args)*);)*
+                fmt.finish()
+            }
+        }
     }
 }
 
@@ -112,6 +176,10 @@ impl AXAttribute<CFType> {
 }
 
 define_attributes![
+    // These we want to appear first in debug output.
+    (role, CFString, kAXRoleAttribute),
+    (subrole, CFString, kAXSubroleAttribute),
+    // The rest are in alphabetical order.
     (allowed_values, CFArray<CFType>, kAXAllowedValuesAttribute),
     (children, CFArray<AXUIElement>, kAXChildrenAttribute),
     (contents, AXUIElement, kAXContentsAttribute),
@@ -135,7 +203,6 @@ define_attributes![
         kAXPositionAttribute,
         set_position
     ),
-    (role, CFString, kAXRoleAttribute),
     (role_description, CFString, kAXRoleDescriptionAttribute),
     (
         selected_children,
@@ -143,7 +210,6 @@ define_attributes![
         kAXSelectedChildrenAttribute
     ),
     (size, AXValue<CGSize>, kAXSizeAttribute, set_size),
-    (subrole, CFString, kAXSubroleAttribute),
     (title, CFString, kAXTitleAttribute),
     (
         top_level_ui_element,

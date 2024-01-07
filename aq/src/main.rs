@@ -7,14 +7,16 @@ use structopt::StructOpt;
 
 struct PrintyBoi {
     level: Cell<usize>,
+    max_depth: usize,
     indent: String,
     children: AXAttribute<CFArray<AXUIElement>>,
 }
 
 impl PrintyBoi {
-    pub fn new_with_indentation(indent: usize) -> Self {
+    pub fn new_with_indentation(indent: usize, max_depth: usize) -> Self {
         Self {
             level: Cell::new(0),
+            max_depth,
             indent: " ".repeat(indent),
             children: AXAttribute::children(),
         }
@@ -26,13 +28,15 @@ impl TreeVisitor for PrintyBoi {
         let indent = self.indent.repeat(self.level.get());
         let role = element.role().unwrap_or_else(|_| CFString::new(""));
 
-        self.level.replace(self.level.get() + 1);
-        println![
+        if self.level.replace(self.level.get() + 1) >= self.max_depth {
+            return TreeWalkerFlow::SkipSubtree;
+        }
+        println!(
             "{}- {} ({} children)",
             indent,
             role,
-            element.children().unwrap().len()
-        ];
+            element.children().map(|a| a.len()).unwrap_or(0)
+        );
 
         if let Ok(names) = element.attribute_names() {
             for name in names.into_iter() {
@@ -56,13 +60,15 @@ impl TreeVisitor for PrintyBoi {
 
 #[derive(StructOpt)]
 pub struct Opt {
-    pub pid: i32,
+    //pub pid: i32,
+    pub max_depth: usize,
 }
 
 fn main() -> Result<(), i32> {
     let opt = Opt::from_args();
-    let app = AXUIElement::application(opt.pid);
-    let printy = PrintyBoi::new_with_indentation(4);
+    //let app = AXUIElement::application(opt.pid);
+    let app = AXUIElement::system_wide();
+    let printy = PrintyBoi::new_with_indentation(4, opt.max_depth);
     let walker = TreeWalker::new();
 
     walker.walk(&app, &printy);

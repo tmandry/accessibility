@@ -31,6 +31,9 @@ impl_TCFType!(AXUIElement, AXUIElementRef, AXUIElementGetTypeID);
 
 impl Debug for AXUIElement {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if f.alternate() {
+            return self.debug_all(f);
+        }
         let (role, title) = (self.role(), self.title());
         let mut fmt = f.debug_tuple(
             role.map(|r| r.to_string())
