@@ -93,7 +93,7 @@ macro_rules! accessor {
 
 macro_rules! debug_field {
     ($self:ident, $fmt:ident, $name:ident, AXUIElement, $($rest:tt)*) => {
-        debug_field!(@short $self, $fmt, $name,);
+        debug_field!(@short $self, $fmt, $name, AXUIElement, $long_name);
     };
     ($self:ident, $fmt:ident, $name:ident, CFArray<AXUIElement>, $($rest:tt)*) => {
             let $name = $self.$name();
@@ -108,13 +108,13 @@ macro_rules! debug_field {
                 $fmt.field(stringify!($name), &value);
             }
     };
-    (@short $self:ident, $fmt:ident, $name:ident, $($rest:tt)*) => {
+    (@short $self:ident, $fmt:ident, $name:ident, $type:ty, $($rest:tt)*) => {
         let $name = $self.$name();
         if let Ok(value) = &$name {
             $fmt.field(stringify!($name), &NoAlternate(value));
         }
     };
-    ($self:ident, $fmt:ident, $name:ident, $($rest:tt)*) => {
+    ($self:ident, $fmt:ident, $name:ident, $type:ty, $($rest:tt)*) => {
         let $name = $self.$name();
         if let Ok(value) = &$name {
             $fmt.field(stringify!($name), &value);
@@ -142,6 +142,10 @@ impl<'a> Debug for Forward<'a> {
 }
 
 macro_rules! define_attributes {
+    (@get_sys_name $name:ident, $type:ty, $sys_name:ident $(, $rest:tt)*) => {
+        $sys_name
+    };
+
     ($(($($args:tt)*)),*,) => {
         impl AXAttribute<()> {
             $(constructor!($($args)*);)*
@@ -162,7 +166,21 @@ macro_rules! define_attributes {
         impl AXUIElement {
             pub(crate) fn debug_all(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 let mut fmt = f.debug_struct("AXUIElement");
+
                 $(debug_field!(self, fmt, $($args)*);)*
+
+                let Ok(attr_names) = self.attribute_names() else {
+                    return fmt.finish();
+                };
+                let attr_names: Vec<CFString> = attr_names.iter().filter(|name| {
+                    $(**name != define_attributes!(@get_sys_name $($args)*) &&)* true
+                }).map(|n| n.clone()).collect();
+                for name in attr_names {
+                    let attr = AXAttribute(name, PhantomData);
+                    if let Ok(val) = self.attribute::<CFType>(&attr) {
+                        fmt.field(&attr.as_CFString().to_string(), &val);
+                    }
+                }
                 fmt.finish()
             }
         }
