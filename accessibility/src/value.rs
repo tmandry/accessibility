@@ -4,9 +4,8 @@ use accessibility_sys::{
     kAXErrorFailure, kAXErrorSuccess, kAXValueTypeCFRange, kAXValueTypeCGPoint, kAXValueTypeCGRect,
     kAXValueTypeCGSize, AXValueCreate, AXValueGetTypeID, AXValueGetValue, AXValueRef, AXValueType,
 };
-use cocoa::appkit::CGPoint;
 use core_foundation::{base::CFRange, declare_TCFType, impl_CFTypeDescription, impl_TCFType};
-use core_graphics_types::geometry::{CGRect, CGSize};
+use core_graphics_types::geometry::{CGPoint, CGRect, CGSize};
 
 use crate::util::ax_call;
 
