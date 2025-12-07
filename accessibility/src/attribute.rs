@@ -6,9 +6,9 @@ use accessibility_sys::{
     kAXMinValueAttribute, kAXMinimizedAttribute, kAXParentAttribute, kAXPlaceholderValueAttribute,
     kAXPositionAttribute, kAXRoleAttribute, kAXRoleDescriptionAttribute,
     kAXSelectedChildrenAttribute, kAXSizeAttribute, kAXSubroleAttribute, kAXTitleAttribute,
-    kAXTopLevelUIElementAttribute, kAXValueAttribute, kAXValueDescriptionAttribute,
-    kAXValueIncrementAttribute, kAXVisibleChildrenAttribute, kAXWindowAttribute,
-    kAXWindowsAttribute,
+    kAXTitleUIElementAttribute, kAXTopLevelUIElementAttribute, kAXValueAttribute,
+    kAXValueDescriptionAttribute, kAXValueIncrementAttribute, kAXVisibleChildrenAttribute,
+    kAXWindowAttribute, kAXWindowsAttribute,
 };
 use core_foundation::{
     array::CFArray,
@@ -17,7 +17,8 @@ use core_foundation::{
     string::CFString,
 };
 use core_graphics_types::geometry::{CGPoint, CGRect, CGSize};
-use std::{fmt::Debug, marker::PhantomData};
+use std::fmt::Debug;
+use std::marker::PhantomData;
 
 use crate::{value::AXValue, AXUIElement, ElementFinder, Error};
 
@@ -71,7 +72,7 @@ macro_rules! accessor {
     (@impl $name:ident, AXValue<$typ:ty>, $const:ident, $setter:ident) => {
         accessor!(@impl $name, AXValue<$typ>, $const);
         fn $setter(&self, value: impl Into<$typ>) -> Result<(), Error> {
-            self.set_attribute(&AXAttribute::$name(), AXValue::new(&value.into()).expect("wrong type"))
+            self.set_attribute(&AXAttribute::$name(), AXValue::new(&value.into())?)
         }
     };
     (@impl $name:ident, $typ:ty, $const:ident, $setter:ident) => {
@@ -82,7 +83,7 @@ macro_rules! accessor {
     };
     (@impl $name:ident, AXValue<$typ:ty>, $const:ident) => {
         fn $name(&self) -> Result<$typ, Error> {
-            self.attribute(&AXAttribute::$name()).map(|v| v.value().expect("wrong type"))
+            self.attribute(&AXAttribute::$name()).and_then(|v| v.value())
         }
     };
     (@impl $name:ident, $typ:ty, $const:ident) => {
@@ -233,6 +234,7 @@ define_attributes![
     ),
     (size, AXValue<CGSize>, kAXSizeAttribute, set_size),
     (title, CFString, kAXTitleAttribute),
+    (title_ui_element, AXUIElement, kAXTitleUIElementAttribute),
     (
         top_level_ui_element,
         AXUIElement,

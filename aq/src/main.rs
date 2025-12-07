@@ -35,7 +35,7 @@ impl TreeVisitor for PrintyBoi {
             "{}- {} ({} children)",
             indent,
             role,
-            element.children().map(|a| a.len()).unwrap_or(0)
+            element.children().map(|c| c.len()).unwrap_or_default()
         );
 
         if let Ok(names) = element.attribute_names() {
@@ -44,7 +44,7 @@ impl TreeVisitor for PrintyBoi {
                     continue;
                 }
 
-                if let Ok(value) = element.attribute(&AXAttribute::new(&*name)) {
+                if let Ok(value) = element.attribute(&AXAttribute::new(&name)) {
                     println!["{}|. {}: {:?}", indent, *name, value];
                 }
             }

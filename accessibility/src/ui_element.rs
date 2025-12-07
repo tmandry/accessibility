@@ -143,14 +143,14 @@ impl AXUIElement {
         let value = value.into();
 
         unsafe {
-            Ok(ax_call_void(|| {
+            ax_call_void(|| {
                 AXUIElementSetAttributeValue(
                     self.0,
                     attribute.as_CFString().as_concrete_TypeRef(),
                     value.as_CFTypeRef(),
                 )
             })
-            .map_err(Error::Ax)?)
+            .map_err(Error::Ax)
         }
     }
 
@@ -178,19 +178,14 @@ impl AXUIElement {
 
     pub fn perform_action(&self, name: &CFString) -> Result<(), Error> {
         unsafe {
-            Ok(
-                ax_call_void(|| AXUIElementPerformAction(self.0, name.as_concrete_TypeRef()))
-                    .map_err(Error::Ax)?,
-            )
+            ax_call_void(|| AXUIElementPerformAction(self.0, name.as_concrete_TypeRef()))
+                .map_err(Error::Ax)
         }
     }
 
     pub fn set_messaging_timeout(&self, timeout: f32) -> Result<(), Error> {
         unsafe {
-            Ok(
-                ax_call_void(|| AXUIElementSetMessagingTimeout(self.0, timeout))
-                    .map_err(Error::Ax)?,
-            )
+            ax_call_void(|| AXUIElementSetMessagingTimeout(self.0, timeout)).map_err(Error::Ax)
         }
     }
 }

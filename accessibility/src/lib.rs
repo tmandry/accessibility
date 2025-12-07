@@ -4,7 +4,7 @@ pub mod ui_element;
 mod util;
 pub mod value;
 
-use accessibility_sys::{error_string, AXError};
+use accessibility_sys::{error_string, AXError, AXValueType};
 use core_foundation::{
     array::CFArray,
     base::CFTypeID,
@@ -22,6 +22,7 @@ pub use action::*;
 pub use attribute::*;
 pub use ui_element::*;
 
+#[non_exhaustive]
 #[derive(Debug, TError)]
 pub enum Error {
     #[error("element not found")]
@@ -34,6 +35,15 @@ pub enum Error {
     UnexpectedType {
         expected: CFTypeID,
         received: CFTypeID,
+    },
+    #[error(
+        "expected attribute value type {} but got {}",
+        value::value_type_name(*expected),
+        value::value_type_name(*received),
+    )]
+    UnexpectedValueType {
+        expected: AXValueType,
+        received: AXValueType,
     },
     #[error("accessibility error {}", error_string(*.0))]
     Ax(AXError),
@@ -59,11 +69,17 @@ pub enum TreeWalkerFlow {
     Exit,
 }
 
-impl TreeWalker {
-    pub fn new() -> Self {
+impl Default for TreeWalker {
+    fn default() -> Self {
         Self {
             attr_children: AXAttribute::children(),
         }
+    }
+}
+
+impl TreeWalker {
+    pub fn new() -> Self {
+        Self::default()
     }
 
     pub fn walk(&self, root: &AXUIElement, visitor: &dyn TreeVisitor) {
@@ -76,7 +92,7 @@ impl TreeWalker {
         if flow == TreeWalkerFlow::Continue {
             if let Ok(children) = root.attribute(&self.attr_children) {
                 for child in children.into_iter() {
-                    let child_flow = self.walk_one(&*child, visitor);
+                    let child_flow = self.walk_one(&child, visitor);
 
                     if child_flow == TreeWalkerFlow::Exit {
                         flow = child_flow;
