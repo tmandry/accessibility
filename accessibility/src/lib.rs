@@ -5,11 +5,8 @@ mod util;
 pub mod value;
 
 use accessibility_sys::{error_string, AXError, AXValueType};
-use core_foundation::{
-    array::CFArray,
-    base::CFTypeID,
-    base::{CFCopyTypeIDDescription, TCFType},
-    string::CFString,
+use objc2_core_foundation::{
+    CFArray, CFCopyTypeIDDescription, CFRetained, CFString, CFTypeID, Type,
 };
 use std::{
     cell::{Cell, RefCell},
@@ -49,8 +46,10 @@ pub enum Error {
     Ax(AXError),
 }
 
-fn type_name(type_id: CFTypeID) -> CFString {
-    unsafe { CFString::wrap_under_create_rule(CFCopyTypeIDDescription(type_id)) }
+fn type_name(type_id: CFTypeID) -> String {
+    CFCopyTypeIDDescription(type_id)
+        .map(|name| name.to_string())
+        .unwrap_or_else(|| "<unknown>".to_owned())
 }
 
 pub trait TreeVisitor {
@@ -91,7 +90,7 @@ impl TreeWalker {
 
         if flow == TreeWalkerFlow::Continue {
             if let Ok(children) = root.attribute(&self.attr_children) {
-                for child in children.into_iter() {
+                for child in children.iter() {
                     let child_flow = self.walk_one(&child, visitor);
 
                     if child_flow == TreeWalkerFlow::Exit {
@@ -108,11 +107,11 @@ impl TreeWalker {
 }
 
 pub struct ElementFinder {
-    root: AXUIElement,
+    root: CFRetained<AXUIElement>,
     implicit_wait: Option<Duration>,
     predicate: Box<dyn Fn(&AXUIElement) -> bool>,
     depth: Cell<usize>,
-    cached: RefCell<Option<AXUIElement>>,
+    cached: RefCell<Option<CFRetained<AXUIElement>>>,
 }
 
 impl ElementFinder {
@@ -121,7 +120,7 @@ impl ElementFinder {
         F: 'static + Fn(&AXUIElement) -> bool,
     {
         Self {
-            root: root.clone(),
+            root: root.retain(),
             predicate: Box::new(predicate),
             implicit_wait,
             depth: Cell::new(0),
@@ -129,7 +128,7 @@ impl ElementFinder {
         }
     }
 
-    pub fn find(&self) -> Result<AXUIElement, Error> {
+    pub fn find(&self) -> Result<CFRetained<AXUIElement>, Error> {
         if let Some(result) = &*self.cached.borrow() {
             return Ok(result.clone());
         }
@@ -162,14 +161,17 @@ impl ElementFinder {
         self.cached.replace(None);
     }
 
-    pub fn attribute<T: TCFType>(&self, attribute: &AXAttribute<T>) -> Result<T, Error> {
+    pub fn attribute<T: AXAttributeValue>(
+        &self,
+        attribute: &AXAttribute<T>,
+    ) -> Result<CFRetained<T>, Error> {
         self.find()?.attribute(attribute)
     }
 
-    pub fn set_attribute<T: TCFType>(
+    pub fn set_attribute<T: AXAttributeValue>(
         &self,
         attribute: &AXAttribute<T>,
-        value: impl Into<T>,
+        value: &T,
     ) -> Result<(), Error> {
         self.find()?.set_attribute(attribute, value)
     }
@@ -186,7 +188,7 @@ impl TreeVisitor for ElementFinder {
         self.depth.set(self.depth.get() + 1);
 
         if (self.predicate)(element) {
-            self.cached.replace(Some(element.clone()));
+            self.cached.replace(Some(element.retain()));
             return TreeWalkerFlow::Exit;
         }
 

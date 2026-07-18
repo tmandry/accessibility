@@ -1,2 +1,3 @@
 [workspace]
 members = ["accessibility", "accessibility-sys", "aq"]
+resolver = "2"

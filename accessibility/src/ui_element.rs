@@ -1,71 +1,71 @@
 use std::{
-    ffi::c_uchar,
+    cell::UnsafeCell,
+    marker::{PhantomData, PhantomPinned},
     thread,
     time::{Duration, Instant},
 };
 
-use accessibility_sys::{
-    pid_t, AXUIElementCopyActionNames, AXUIElementCopyAttributeNames,
-    AXUIElementCopyAttributeValue, AXUIElementCreateApplication, AXUIElementCreateSystemWide,
-    AXUIElementGetTypeID, AXUIElementIsAttributeSettable, AXUIElementPerformAction, AXUIElementRef,
-    AXUIElementSetAttributeValue, AXUIElementSetMessagingTimeout,
-};
-use cocoa::{
-    base::{id, nil},
-    foundation::{NSAutoreleasePool, NSFastEnumeration, NSString},
-};
-use core_foundation::{
-    array::CFArray,
-    base::{CFType, TCFType, TCFTypeRef},
-    declare_TCFType, impl_CFTypeDescription, impl_TCFType,
-    string::CFString,
-};
-use objc::{class, msg_send, rc::autoreleasepool, sel, sel_impl};
+use accessibility_sys::pid_t;
+use objc2_app_kit::NSRunningApplication;
+use objc2_core_foundation::{cf_type, CFArray, CFRetained, CFString, CFTypeID, ConcreteType};
+use objc2_foundation::NSString;
 
 use crate::{
-    util::{ax_call, ax_call_void},
-    AXAttribute, Error,
+    util::{ax_call, ax_call_retained, ax_call_void},
+    AXAttribute, AXAttributeValue, Error,
 };
 
-declare_TCFType!(AXUIElement, AXUIElementRef);
-impl_TCFType!(AXUIElement, AXUIElementRef, AXUIElementGetTypeID);
-impl_CFTypeDescription!(AXUIElement);
+/// An element in the macOS accessibility hierarchy.
+#[repr(C)]
+pub struct AXUIElement {
+    inner: [u8; 0],
+    _p: UnsafeCell<PhantomData<(*const UnsafeCell<()>, PhantomPinned)>>,
+}
+
+// SAFETY: AXUIElement is a CoreFoundation type, declared here as a zero-sized
+// type with #[repr(C)]. Every instance of it is an
+// `accessibility_sys::AXUIElement`, which it therefore also dereferences to.
+cf_type!(
+    unsafe impl AXUIElement: accessibility_sys::AXUIElement {}
+);
+
+// SAFETY: Instances of this type are `accessibility_sys::AXUIElement`s, so they
+// share its type id.
+unsafe impl ConcreteType for AXUIElement {
+    fn type_id() -> CFTypeID {
+        accessibility_sys::AXUIElement::type_id()
+    }
+}
 
 impl AXUIElement {
-    pub fn system_wide() -> Self {
-        unsafe { Self::wrap_under_create_rule(AXUIElementCreateSystemWide()) }
+    pub fn system_wide() -> CFRetained<Self> {
+        // SAFETY: No preconditions.
+        let element = unsafe { accessibility_sys::AXUIElement::new_system_wide() };
+
+        // SAFETY: The element came from AXUIElementCreateSystemWide.
+        unsafe { CFRetained::cast_unchecked::<Self>(element) }
     }
 
-    pub fn application(pid: pid_t) -> Self {
-        unsafe { Self::wrap_under_create_rule(AXUIElementCreateApplication(pid)) }
+    pub fn application(pid: pid_t) -> CFRetained<Self> {
+        // SAFETY: No preconditions.
+        let element = unsafe { accessibility_sys::AXUIElement::new_application(pid) };
+
+        // SAFETY: The element came from AXUIElementCreateApplication.
+        unsafe { CFRetained::cast_unchecked::<Self>(element) }
     }
 
-    pub fn application_with_bundle(bundle_id: &str) -> Result<Self, Error> {
-        unsafe {
-            autoreleasepool(|| {
-                let bundle_id_str = NSString::alloc(nil).init_str(bundle_id).autorelease();
-                let apps: id = msg_send![
-                    class![NSRunningApplication],
-                    runningApplicationsWithBundleIdentifier: bundle_id_str
-                ];
+    pub fn application_with_bundle(bundle_id: &str) -> Result<CFRetained<Self>, Error> {
+        let bundle_id = NSString::from_str(bundle_id);
+        let apps = NSRunningApplication::runningApplicationsWithBundleIdentifier(&bundle_id);
+        let app = apps.firstObject().ok_or(Error::NotFound)?;
 
-                if let Some(app) = apps.iter().next() {
-                    let pid: pid_t = msg_send![app, processIdentifier];
-
-                    Ok(Self::wrap_under_create_rule(AXUIElementCreateApplication(
-                        pid,
-                    )))
-                } else {
-                    Err(Error::NotFound)
-                }
-            })
-        }
+        Ok(Self::application(app.processIdentifier()))
     }
 
     pub fn application_with_bundle_timeout(
         bundle_id: &str,
         timeout: Duration,
-    ) -> Result<Self, Error> {
+    ) -> Result<CFRetained<Self>, Error> {
         let deadline = Instant::now() + timeout;
 
         loop {
@@ -85,89 +85,94 @@ impl AXUIElement {
         }
     }
 
-    pub fn attribute_names(&self) -> Result<CFArray<CFString>, Error> {
-        unsafe {
-            Ok(CFArray::wrap_under_create_rule(
-                ax_call(|x| AXUIElementCopyAttributeNames(self.0, x)).map_err(Error::Ax)?,
-            ))
-        }
+    pub fn attribute_names(&self) -> Result<CFRetained<CFArray<CFString>>, Error> {
+        // SAFETY: The out parameter is passed on from `ax_call_retained`.
+        let names: CFRetained<CFArray> = unsafe {
+            ax_call_retained(|names| {
+                accessibility_sys::AXUIElement::copy_attribute_names(self, names)
+            })
+        }?;
+
+        // SAFETY: AXUIElementCopyAttributeNames returns an array of strings.
+        Ok(unsafe { CFRetained::cast_unchecked::<CFArray<CFString>>(names) })
     }
 
-    pub fn attribute<T: TCFType>(&self, attribute: &AXAttribute<T>) -> Result<T, Error> {
-        let res = unsafe {
-            Ok(T::wrap_under_create_rule(T::Ref::from_void_ptr(
-                ax_call(|x| {
-                    AXUIElementCopyAttributeValue(
-                        self.0,
-                        attribute.as_CFString().as_concrete_TypeRef(),
-                        x,
-                    )
-                })
-                .map_err(Error::Ax)?,
-            )))
-        };
-        if let Ok(val) = &res {
-            if T::type_id() != CFType::type_id() && !val.instance_of::<T>() {
-                return Err(Error::UnexpectedType {
-                    expected: T::type_id(),
-                    received: val.type_of(),
-                });
-            }
-        }
-        res
-    }
-
-    pub fn set_attribute<T: TCFType>(
+    pub fn attribute<T: AXAttributeValue>(
         &self,
         attribute: &AXAttribute<T>,
-        value: impl Into<T>,
-    ) -> Result<(), Error> {
-        let value = value.into();
-
-        unsafe {
-            ax_call_void(|| {
-                AXUIElementSetAttributeValue(
-                    self.0,
-                    attribute.as_CFString().as_concrete_TypeRef(),
-                    value.as_CFTypeRef(),
+    ) -> Result<CFRetained<T>, Error> {
+        // SAFETY: The out parameter is passed on from `ax_call_retained`.
+        let value = unsafe {
+            ax_call_retained(|value| {
+                accessibility_sys::AXUIElement::copy_attribute_value(
+                    self,
+                    attribute.as_CFString(),
+                    value,
                 )
             })
-            .map_err(Error::Ax)
-        }
+        }?;
+
+        T::downcast(value)
     }
 
-    pub fn is_settable<T: TCFType>(&self, attribute: &AXAttribute<T>) -> Result<bool, Error> {
-        let settable: c_uchar = unsafe {
-            ax_call(|x| {
-                AXUIElementIsAttributeSettable(
-                    self.0,
-                    attribute.as_CFString().as_concrete_TypeRef(),
-                    x,
+    pub fn set_attribute<T: AXAttributeValue>(
+        &self,
+        attribute: &AXAttribute<T>,
+        value: &T,
+    ) -> Result<(), Error> {
+        // SAFETY: No preconditions.
+        unsafe {
+            ax_call_void(|| {
+                accessibility_sys::AXUIElement::set_attribute_value(
+                    self,
+                    attribute.as_CFString(),
+                    value.as_ref(),
                 )
             })
-            .map_err(Error::Ax)?
-        };
+        }
+        .map_err(Error::Ax)
+    }
+
+    pub fn is_settable<T: AXAttributeValue>(
+        &self,
+        attribute: &AXAttribute<T>,
+    ) -> Result<bool, Error> {
+        // SAFETY: The out parameter is passed on from `ax_call`.
+        let settable = unsafe {
+            ax_call(|settable| {
+                accessibility_sys::AXUIElement::is_attribute_settable(
+                    self,
+                    attribute.as_CFString(),
+                    settable,
+                )
+            })
+        }
+        .map_err(Error::Ax)?;
+
         Ok(settable != 0)
     }
 
-    pub fn action_names(&self) -> Result<CFArray<CFString>, Error> {
-        unsafe {
-            Ok(CFArray::wrap_under_create_rule(
-                ax_call(|x| AXUIElementCopyActionNames(self.0, x)).map_err(Error::Ax)?,
-            ))
-        }
+    pub fn action_names(&self) -> Result<CFRetained<CFArray<CFString>>, Error> {
+        // SAFETY: The out parameter is passed on from `ax_call_retained`.
+        let names: CFRetained<CFArray> = unsafe {
+            ax_call_retained(|names| accessibility_sys::AXUIElement::copy_action_names(self, names))
+        }?;
+
+        // SAFETY: AXUIElementCopyActionNames returns an array of strings.
+        Ok(unsafe { CFRetained::cast_unchecked::<CFArray<CFString>>(names) })
     }
 
     pub fn perform_action(&self, name: &CFString) -> Result<(), Error> {
-        unsafe {
-            ax_call_void(|| AXUIElementPerformAction(self.0, name.as_concrete_TypeRef()))
-                .map_err(Error::Ax)
-        }
+        // SAFETY: No preconditions.
+        unsafe { ax_call_void(|| accessibility_sys::AXUIElement::perform_action(self, name)) }
+            .map_err(Error::Ax)
     }
 
     pub fn set_messaging_timeout(&self, timeout: f32) -> Result<(), Error> {
+        // SAFETY: No preconditions.
         unsafe {
-            ax_call_void(|| AXUIElementSetMessagingTimeout(self.0, timeout)).map_err(Error::Ax)
+            ax_call_void(|| accessibility_sys::AXUIElement::set_messaging_timeout(self, timeout))
         }
+        .map_err(Error::Ax)
     }
 }

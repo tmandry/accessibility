@@ -10,25 +10,84 @@ use accessibility_sys::{
     kAXValueDescriptionAttribute, kAXValueIncrementAttribute, kAXVisibleChildrenAttribute,
     kAXWindowAttribute, kAXWindowsAttribute,
 };
-use core_foundation::{
-    array::CFArray,
-    base::{CFType, TCFType},
-    boolean::CFBoolean,
-    string::CFString,
+use objc2_core_foundation::{
+    CFArray, CFBoolean, CFGetTypeID, CFNumber, CFRetained, CFString, CFType, CFTypeID, CGPoint,
+    CGRect, CGSize, ConcreteType, Type,
 };
-use core_graphics_types::geometry::{CGPoint, CGRect, CGSize};
 use std::marker::PhantomData;
 
 use crate::{value::AXValue, AXUIElement, ElementFinder, Error};
 
+/// A Core Foundation accessibility attribute value.
+///
+/// # Safety
+///
+/// `type_id` must identify `Self`, or return `None` to accept any type.
+pub unsafe trait AXAttributeValue: Type + Sized + AsRef<CFType> {
+    /// Returns the required type ID, or `None` to accept any type.
+    fn type_id() -> Option<CFTypeID>;
+
+    /// Downcasts `value` after checking its type ID.
+    fn downcast(value: CFRetained<CFType>) -> Result<CFRetained<Self>, Error> {
+        if let Some(expected) = Self::type_id() {
+            let received = CFGetTypeID(Some(&value));
+
+            if received != expected {
+                return Err(Error::UnexpectedType { expected, received });
+            }
+        }
+
+        // SAFETY: The value's type id matches Self, per the trait's contract.
+        Ok(unsafe { CFRetained::cast_unchecked::<Self>(value) })
+    }
+}
+
+macro_rules! impl_attribute_value {
+    ($($typ:ty),*,) => {
+        $(
+            // SAFETY: The type id is the one of the implementing type.
+            unsafe impl AXAttributeValue for $typ {
+                fn type_id() -> Option<CFTypeID> {
+                    Some(<$typ as ConcreteType>::type_id())
+                }
+            }
+        )*
+    };
+}
+
+impl_attribute_value![CFBoolean, CFNumber, CFString, AXUIElement,];
+
+// SAFETY: Any type is acceptable as a CFType.
+unsafe impl AXAttributeValue for CFType {
+    fn type_id() -> Option<CFTypeID> {
+        None
+    }
+}
+
+// SAFETY: The type id is that of CFArray, whatever the element type. As with
+// the untyped `CFArray`, the element type is not checked.
+unsafe impl<T: Type> AXAttributeValue for CFArray<T> {
+    fn type_id() -> Option<CFTypeID> {
+        Some(<CFArray as ConcreteType>::type_id())
+    }
+}
+
+// SAFETY: The type id is that of AXValue, whatever the wrapped structure. The
+// structure's type is checked when the value is read out with `AXValue::value`.
+unsafe impl<T> AXAttributeValue for AXValue<T> {
+    fn type_id() -> Option<CFTypeID> {
+        Some(accessibility_sys::AXValue::type_id())
+    }
+}
+
 pub trait TAXAttribute {
-    type Value: TCFType;
+    type Value: AXAttributeValue;
 }
 
 #[derive(Clone, Debug)]
-pub struct AXAttribute<T>(CFString, PhantomData<*const T>);
+pub struct AXAttribute<T>(CFRetained<CFString>, PhantomData<*const T>);
 
-impl<T: TCFType> TAXAttribute for AXAttribute<T> {
+impl<T: AXAttributeValue> TAXAttribute for AXAttribute<T> {
     type Value = T;
 }
 
@@ -42,7 +101,7 @@ impl<T> AXAttribute<T> {
 macro_rules! constructor {
     ($name:ident, $typ:ty, $const:ident $(,$setter:ident)?) => {
         pub fn $name() -> AXAttribute<$typ> {
-            AXAttribute(CFString::from_static_string($const), PhantomData)
+            AXAttribute(CFString::from_static_str($const), PhantomData)
         }
     };
 }
@@ -52,25 +111,35 @@ macro_rules! accessor {
         accessor!(@decl $name, AXValue<$typ>, $const);
         fn $setter(&self, value: impl Into<$typ>) -> Result<(), Error>;
     };
+    (@decl $name:ident, CFBoolean, $const:ident, $setter:ident) => {
+        accessor!(@decl $name, CFBoolean, $const);
+        fn $setter(&self, value: bool) -> Result<(), Error>;
+    };
     (@decl $name:ident, $typ:ty, $const:ident, $setter:ident) => {
         accessor!(@decl $name, $typ, $const);
-        fn $setter(&self, value: impl Into<$typ>) -> Result<(), Error>;
+        fn $setter(&self, value: &$typ) -> Result<(), Error>;
     };
     (@decl $name:ident, AXValue<$typ:ty>, $const:ident) => {
         fn $name(&self) -> Result<$typ, Error>;
     };
     (@decl $name:ident, $typ:ty, $const:ident) => {
-        fn $name(&self) -> Result<$typ, Error>;
+        fn $name(&self) -> Result<CFRetained<$typ>, Error>;
     };
     (@impl $name:ident, AXValue<$typ:ty>, $const:ident, $setter:ident) => {
         accessor!(@impl $name, AXValue<$typ>, $const);
         fn $setter(&self, value: impl Into<$typ>) -> Result<(), Error> {
-            self.set_attribute(&AXAttribute::$name(), AXValue::new(&value.into())?)
+            self.set_attribute(&AXAttribute::$name(), &*AXValue::new(&value.into())?)
+        }
+    };
+    (@impl $name:ident, CFBoolean, $const:ident, $setter:ident) => {
+        accessor!(@impl $name, CFBoolean, $const);
+        fn $setter(&self, value: bool) -> Result<(), Error> {
+            self.set_attribute(&AXAttribute::$name(), CFBoolean::new(value))
         }
     };
     (@impl $name:ident, $typ:ty, $const:ident, $setter:ident) => {
         accessor!(@impl $name, $typ, $const);
-        fn $setter(&self, value: impl Into<$typ>) -> Result<(), Error> {
+        fn $setter(&self, value: &$typ) -> Result<(), Error> {
             self.set_attribute(&AXAttribute::$name(), value)
         }
     };
@@ -80,7 +149,7 @@ macro_rules! accessor {
         }
     };
     (@impl $name:ident, $typ:ty, $const:ident) => {
-        fn $name(&self) -> Result<$typ, Error> {
+        fn $name(&self) -> Result<CFRetained<$typ>, Error> {
             self.attribute(&AXAttribute::$name())
         }
     };
@@ -108,7 +177,7 @@ macro_rules! define_attributes {
 
 impl AXAttribute<CFType> {
     pub fn new(name: &CFString) -> Self {
-        AXAttribute(name.to_owned(), PhantomData)
+        AXAttribute(name.retain(), PhantomData)
     }
 }
 

@@ -2,7 +2,7 @@ use accessibility_sys::{
     kAXConfirmAction, kAXDecrementAction, kAXIncrementAction, kAXPickAction, kAXPressAction,
     kAXRaiseAction, kAXShowAlternateUIAction, kAXShowDefaultUIAction, kAXShowMenuAction,
 };
-use core_foundation::string::CFString;
+use objc2_core_foundation::CFString;
 
 use crate::{AXUIElement, ElementFinder, Error};
 
@@ -12,7 +12,7 @@ macro_rules! performer {
     };
     (@impl $name:ident, $const:ident) => {
         fn $name(&self) -> Result<(), Error> {
-            self.perform_action(&CFString::from_static_string($const))
+            self.perform_action(&CFString::from_static_str($const))
         }
     };
 }

@@ -1,21 +1,32 @@
 [package]
 name = "accessibility"
-version = "0.3.0"
+version = "0.4.0"
 authors = ["Mack Straight <mack@discordapp.com>"]
-edition = "2018"
+edition = "2021"
 license = "MIT / Apache-2.0"
 homepage = "https://github.com/eiz/accessibility"
 repository = "https://github.com/eiz/accessibility"
 description = "Bindings for macOS Accessibility services"
 
 [dependencies]
-cocoa = "0.26"
-core-foundation = "0.10.1"
-objc = "0.2"
 thiserror = "1"
 
-accessibility-sys = { path = "../accessibility-sys", version = "0.2.0" }
-core-graphics-types = "0.2.0"
+accessibility-sys = { path = "../accessibility-sys", version = "0.3.0" }
+
+[dependencies.objc2-core-foundation]
+version = "0.3.2"
+default-features = false
+features = ["std", "CFArray", "CFCGTypes", "CFNumber", "CFString"]
+
+[dependencies.objc2-app-kit]
+version = "0.3.2"
+default-features = false
+features = ["std", "libc", "NSRunningApplication"]
+
+[dependencies.objc2-foundation]
+version = "0.3.2"
+default-features = false
+features = ["std", "NSArray", "NSString"]
 
 [package.metadata.docs.rs]
 default-target = "x86_64-apple-darwin"

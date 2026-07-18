@@ -1,7 +1,7 @@
 use accessibility::{
     AXAttribute, AXUIElement, AXUIElementAttributes, TreeVisitor, TreeWalker, TreeWalkerFlow,
 };
-use core_foundation::{array::CFArray, string::CFString};
+use objc2_core_foundation::{CFArray, CFString};
 use std::cell::Cell;
 use structopt::StructOpt;
 
@@ -24,7 +24,9 @@ impl PrintyBoi {
 impl TreeVisitor for PrintyBoi {
     fn enter_element(&self, element: &AXUIElement) -> TreeWalkerFlow {
         let indent = self.indent.repeat(self.level.get());
-        let role = element.role().unwrap_or_else(|_| CFString::new(""));
+        let role = element
+            .role()
+            .unwrap_or_else(|_| CFString::from_static_str(""));
 
         self.level.replace(self.level.get() + 1);
         println![
@@ -35,13 +37,13 @@ impl TreeVisitor for PrintyBoi {
         ];
 
         if let Ok(names) = element.attribute_names() {
-            for name in names.into_iter() {
+            for name in names.iter() {
                 if &*name == self.children.as_CFString() {
                     continue;
                 }
 
                 if let Ok(value) = element.attribute(&AXAttribute::new(&name)) {
-                    println!["{}|. {}: {:?}", indent, *name, value];
+                    println!["{}|. {}: {:?}", indent, name, value];
                 }
             }
         }
