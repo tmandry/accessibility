@@ -48,12 +48,22 @@ pub struct AXValue<T: ?Sized> {
     _kind: PhantomData<*mut T>,
 }
 
-// SAFETY: AXValue is a CoreFoundation type, declared here as a zero-sized type
-// with #[repr(C)]. Every instance of it is an `accessibility_sys::AXValue`,
-// which it therefore also dereferences to.
+// SAFETY: AXValue is a CoreFoundation type, declared here as an opaque type
+// with #[repr(C)], in the way objc2 declares them (pending `extern type`).
 cf_type!(
-    unsafe impl<T: ?Sized> AXValue<T>: accessibility_sys::AXValue {}
+    unsafe impl<T: ?Sized> AXValue<T> {}
 );
+
+impl<T: ?Sized> AXValue<T> {
+    /// Returns this value as the raw API type.
+    pub fn as_sys(&self) -> &accessibility_sys::AXValue {
+        let ptr: *const Self = self;
+
+        // SAFETY: Both types are opaque declarations of the same CoreFoundation
+        // object, so a reference to one is a reference to the other.
+        unsafe { &*ptr.cast::<accessibility_sys::AXValue>() }
+    }
+}
 
 impl<T: AXValueKind> AXValue<T> {
     pub fn new(value: &T) -> Result<CFRetained<Self>, Error> {
@@ -73,14 +83,14 @@ impl<T: AXValueKind> AXValue<T> {
 
         // SAFETY: `ptr` points to enough space to hold a `T`, which is what
         // `T::TYPE` names.
-        if unsafe { accessibility_sys::AXValue::value(self, T::TYPE, ptr) } {
+        if unsafe { self.as_sys().value(T::TYPE, ptr) } {
             // SAFETY: AXValueGetValue succeeded, so it initialized the value.
             Ok(unsafe { result.assume_init() })
         } else {
             Err(Error::UnexpectedValueType {
                 expected: T::TYPE,
                 // SAFETY: No preconditions.
-                received: unsafe { accessibility_sys::AXValue::r#type(self) },
+                received: unsafe { self.as_sys().r#type() },
             })
         }
     }

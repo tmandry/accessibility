@@ -22,11 +22,10 @@ pub struct AXUIElement {
     _p: UnsafeCell<PhantomData<(*const UnsafeCell<()>, PhantomPinned)>>,
 }
 
-// SAFETY: AXUIElement is a CoreFoundation type, declared here as a zero-sized
-// type with #[repr(C)]. Every instance of it is an
-// `accessibility_sys::AXUIElement`, which it therefore also dereferences to.
+// SAFETY: AXUIElement is a CoreFoundation type, declared here as an opaque type
+// with #[repr(C)], in the way objc2 declares them (pending `extern type`).
 cf_type!(
-    unsafe impl AXUIElement: accessibility_sys::AXUIElement {}
+    unsafe impl AXUIElement {}
 );
 
 // SAFETY: Instances of this type are `accessibility_sys::AXUIElement`s, so they
@@ -38,6 +37,15 @@ unsafe impl ConcreteType for AXUIElement {
 }
 
 impl AXUIElement {
+    /// Returns this element as the raw API type.
+    pub fn as_sys(&self) -> &accessibility_sys::AXUIElement {
+        let ptr: *const Self = self;
+
+        // SAFETY: Both types are opaque declarations of the same CoreFoundation
+        // object, so a reference to one is a reference to the other.
+        unsafe { &*ptr.cast::<accessibility_sys::AXUIElement>() }
+    }
+
     pub fn system_wide() -> CFRetained<Self> {
         // SAFETY: No preconditions.
         let element = unsafe { accessibility_sys::AXUIElement::new_system_wide() };
@@ -87,11 +95,8 @@ impl AXUIElement {
 
     pub fn attribute_names(&self) -> Result<CFRetained<CFArray<CFString>>, Error> {
         // SAFETY: The out parameter is passed on from `ax_call_retained`.
-        let names: CFRetained<CFArray> = unsafe {
-            ax_call_retained(|names| {
-                accessibility_sys::AXUIElement::copy_attribute_names(self, names)
-            })
-        }?;
+        let names: CFRetained<CFArray> =
+            unsafe { ax_call_retained(|names| self.as_sys().copy_attribute_names(names)) }?;
 
         // SAFETY: AXUIElementCopyAttributeNames returns an array of strings.
         Ok(unsafe { CFRetained::cast_unchecked::<CFArray<CFString>>(names) })
@@ -104,11 +109,8 @@ impl AXUIElement {
         // SAFETY: The out parameter is passed on from `ax_call_retained`.
         let value = unsafe {
             ax_call_retained(|value| {
-                accessibility_sys::AXUIElement::copy_attribute_value(
-                    self,
-                    attribute.as_CFString(),
-                    value,
-                )
+                self.as_sys()
+                    .copy_attribute_value(attribute.as_CFString(), value)
             })
         }?;
 
@@ -123,11 +125,8 @@ impl AXUIElement {
         // SAFETY: No preconditions.
         unsafe {
             ax_call_void(|| {
-                accessibility_sys::AXUIElement::set_attribute_value(
-                    self,
-                    attribute.as_CFString(),
-                    value.as_ref(),
-                )
+                self.as_sys()
+                    .set_attribute_value(attribute.as_CFString(), value.as_ref())
             })
         }
         .map_err(Error::Ax)
@@ -140,11 +139,8 @@ impl AXUIElement {
         // SAFETY: The out parameter is passed on from `ax_call`.
         let settable = unsafe {
             ax_call(|settable| {
-                accessibility_sys::AXUIElement::is_attribute_settable(
-                    self,
-                    attribute.as_CFString(),
-                    settable,
-                )
+                self.as_sys()
+                    .is_attribute_settable(attribute.as_CFString(), settable)
             })
         }
         .map_err(Error::Ax)?;
@@ -154,9 +150,8 @@ impl AXUIElement {
 
     pub fn action_names(&self) -> Result<CFRetained<CFArray<CFString>>, Error> {
         // SAFETY: The out parameter is passed on from `ax_call_retained`.
-        let names: CFRetained<CFArray> = unsafe {
-            ax_call_retained(|names| accessibility_sys::AXUIElement::copy_action_names(self, names))
-        }?;
+        let names: CFRetained<CFArray> =
+            unsafe { ax_call_retained(|names| self.as_sys().copy_action_names(names)) }?;
 
         // SAFETY: AXUIElementCopyActionNames returns an array of strings.
         Ok(unsafe { CFRetained::cast_unchecked::<CFArray<CFString>>(names) })
@@ -164,15 +159,11 @@ impl AXUIElement {
 
     pub fn perform_action(&self, name: &CFString) -> Result<(), Error> {
         // SAFETY: No preconditions.
-        unsafe { ax_call_void(|| accessibility_sys::AXUIElement::perform_action(self, name)) }
-            .map_err(Error::Ax)
+        unsafe { ax_call_void(|| self.as_sys().perform_action(name)) }.map_err(Error::Ax)
     }
 
     pub fn set_messaging_timeout(&self, timeout: f32) -> Result<(), Error> {
         // SAFETY: No preconditions.
-        unsafe {
-            ax_call_void(|| accessibility_sys::AXUIElement::set_messaging_timeout(self, timeout))
-        }
-        .map_err(Error::Ax)
+        unsafe { ax_call_void(|| self.as_sys().set_messaging_timeout(timeout)) }.map_err(Error::Ax)
     }
 }

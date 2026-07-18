@@ -1,10 +1,11 @@
 pub mod action;
 pub mod attribute;
+mod error;
 pub mod ui_element;
 mod util;
 pub mod value;
 
-use accessibility_sys::{error_string, AXError, AXValueType};
+use accessibility_sys::AXValueType;
 use objc2_core_foundation::{
     CFArray, CFCopyTypeIDDescription, CFRetained, CFString, CFTypeID, Type,
 };
@@ -17,6 +18,7 @@ use thiserror::Error as TError;
 
 pub use action::*;
 pub use attribute::*;
+pub use error::*;
 pub use ui_element::*;
 
 #[non_exhaustive]
@@ -42,7 +44,7 @@ pub enum Error {
         expected: AXValueType,
         received: AXValueType,
     },
-    #[error("accessibility error {}", error_string(*.0))]
+    #[error("accessibility error: {0}")]
     Ax(AXError),
 }
 
